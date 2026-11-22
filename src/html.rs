@@ -42,8 +42,14 @@ pub fn render_drift_html(report: &DriftReport) -> String {
 
     let mut rows_html = String::new();
     for f in &report.features {
-        let ks_s = f.ks_stat.map(|v| format!("{v:.3}")).unwrap_or_else(|| "—".to_string());
-        let z_s = f.mean_z_shift.map(|v| format!("{v:+.2}σ")).unwrap_or_else(|| "—".to_string());
+        let ks_s = f
+            .ks_stat
+            .map(|v| format!("{v:.3}"))
+            .unwrap_or_else(|| "—".to_string());
+        let z_s = f
+            .mean_z_shift
+            .map(|v| format!("{v:+.2}σ"))
+            .unwrap_or_else(|| "—".to_string());
         let notes = if f.reasons.is_empty() {
             "Within bounds".to_string()
         } else {
@@ -79,9 +85,13 @@ pub fn render_drift_html(report: &DriftReport) -> String {
             esc(&pd.feature),
             badge(pd.severity),
             pd.psi,
-            pd.ks_stat.map(|v| format!("{v:.3}")).unwrap_or_else(|| "—".to_string()),
+            pd.ks_stat
+                .map(|v| format!("{v:.3}"))
+                .unwrap_or_else(|| "—".to_string()),
             pd.js_divergence,
-            pd.mean_z_shift.map(|v| format!("{v:+.2}σ")).unwrap_or_else(|| "—".to_string()),
+            pd.mean_z_shift
+                .map(|v| format!("{v:+.2}σ"))
+                .unwrap_or_else(|| "—".to_string()),
         )
     } else {
         String::new()

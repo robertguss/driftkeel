@@ -37,7 +37,10 @@ impl BaselineSnapshot {
             return Err(format!("invalid baseline tool `{}`", self.tool));
         }
         if self.bins < 2 {
-            return Err(format!("invalid baseline bins `{}` (must be >= 2)", self.bins));
+            return Err(format!(
+                "invalid baseline bins `{}` (must be >= 2)",
+                self.bins
+            ));
         }
         for (col, base) in &self.columns {
             match base {
@@ -48,7 +51,8 @@ impl BaselineSnapshot {
                     quantile_sketch,
                     ..
                 } => {
-                    if !missing_rate.is_finite() || !(*missing_rate >= 0.0 && *missing_rate <= 1.0) {
+                    if !missing_rate.is_finite() || !(*missing_rate >= 0.0 && *missing_rate <= 1.0)
+                    {
                         return Err(format!("invalid missing_rate on baseline column `{col}`"));
                     }
                     if bin_props.len() != bin_edges.len() + 1 {
@@ -83,7 +87,8 @@ impl BaselineSnapshot {
                     frequencies,
                     ..
                 } => {
-                    if !missing_rate.is_finite() || !(*missing_rate >= 0.0 && *missing_rate <= 1.0) {
+                    if !missing_rate.is_finite() || !(*missing_rate >= 0.0 && *missing_rate <= 1.0)
+                    {
                         return Err(format!("invalid missing_rate on baseline column `{col}`"));
                     }
                     if frequencies.values().any(|v| !v.is_finite() || *v < 0.0) {
@@ -584,8 +589,16 @@ pub fn build_snapshot(
         calibration_baseline,
     };
     let mut hasher = Sha256::new();
-    hasher.update(serde_json::to_string(&snap.columns).unwrap_or_default().as_bytes());
-    snap.sha256 = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    hasher.update(
+        serde_json::to_string(&snap.columns)
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    snap.sha256 = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     snap
 }
 
@@ -683,7 +696,10 @@ pub fn evaluate_drift(
                 ));
             } else if cur_cal.ece >= thresholds.ece_fail * 0.65 {
                 sev = sev.max(Severity::Warn);
-                reasons.push(format!("CALIBRATION_ECE_WARN: current ECE {:.4}", cur_cal.ece));
+                reasons.push(format!(
+                    "CALIBRATION_ECE_WARN: current ECE {:.4}",
+                    cur_cal.ece
+                ));
             }
             let (ece_delta, brier_delta, base_rate_delta) =
                 if let Some(ref_cal) = &baseline.calibration_baseline {
@@ -747,9 +763,16 @@ pub fn evaluate_drift(
 
     let mut recommendations = Vec::new();
     if verdict == Severity::Stable {
-        recommendations.push("All monitored features and distributions are within healthy bounds; safe to score.".to_string());
+        recommendations.push(
+            "All monitored features and distributions are within healthy bounds; safe to score."
+                .to_string(),
+        );
     } else {
-        for f in features.iter().filter(|f| f.severity != Severity::Stable).take(5) {
+        for f in features
+            .iter()
+            .filter(|f| f.severity != Severity::Stable)
+            .take(5)
+        {
             if f.missing_delta >= thresholds.missing_warn {
                 recommendations.push(format!(
                     "Audit upstream ETL join for `{}`: missingness jumped {:+.1}pp ({:.1}% -> {:.1}%).",
@@ -793,7 +816,11 @@ pub fn evaluate_drift(
     hasher.update(baseline.sha256.as_bytes());
     hasher.update(current_source.as_bytes());
     hasher.update(format!("{}:{:.6}:{:.6}", current.row_count, max_psi, max_ks).as_bytes());
-    let sha256: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let sha256: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
 
     DriftReport {
         tool: "driftkeel".to_string(),
@@ -1010,7 +1037,10 @@ fn compare_column(
                     let direct = cur_counts.get(k).copied().unwrap_or(0);
                     ((direct + other_cur_count) as f64) / denom
                 } else {
-                    cur_counts.get(k).map(|&c| (c as f64) / denom).unwrap_or(0.0)
+                    cur_counts
+                        .get(k)
+                        .map(|&c| (c as f64) / denom)
+                        .unwrap_or(0.0)
                 };
                 p_vec.push(rp);
                 q_vec.push(cp);
@@ -1020,7 +1050,11 @@ fn compare_column(
                     cur_pct: r4(cp * 100.0),
                 });
             }
-            bin_comp.sort_by(|a, b| b.cur_pct.max(b.ref_pct).total_cmp(&a.cur_pct.max(a.ref_pct)));
+            bin_comp.sort_by(|a, b| {
+                b.cur_pct
+                    .max(b.ref_pct)
+                    .total_cmp(&a.cur_pct.max(a.ref_pct))
+            });
             bin_comp.truncate(12);
 
             let psi = compute_psi(&p_vec, &q_vec);
@@ -1068,7 +1102,12 @@ fn compare_column(
                 reasons.push(format!(
                     "UNSEEN_CATEGORIES({}): {} ({:.1}% of rows)",
                     unseen.len(),
-                    unseen.iter().take(4).cloned().collect::<Vec<_>>().join(", "),
+                    unseen
+                        .iter()
+                        .take(4)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     unseen_share * 100.0
                 ));
             }

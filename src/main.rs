@@ -105,7 +105,9 @@ fn dispatch(cli: Cli) -> Result<u8, String> {
                 "sha256": snap.sha256,
             });
             match format.resolve() {
-                ResolvedFormat::Json => println!("{}", serde_json::to_string_pretty(&summary).unwrap()),
+                ResolvedFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&summary).unwrap())
+                }
                 ResolvedFormat::Agent => println!("{}", serde_json::to_string(&summary).unwrap()),
                 ResolvedFormat::Human => {
                     println!(
@@ -242,7 +244,9 @@ fn dispatch(cli: Cli) -> Result<u8, String> {
                             "  [PRED ] {:<24} psi={:.3}  ks={}  js={:.3}  {}",
                             pd.feature,
                             pd.psi,
-                            pd.ks_stat.map(|v| format!("{v:.3}")).unwrap_or_else(|| "-".into()),
+                            pd.ks_stat
+                                .map(|v| format!("{v:.3}"))
+                                .unwrap_or_else(|| "-".into()),
                             pd.js_divergence,
                             pd.reasons.join("; ")
                         );

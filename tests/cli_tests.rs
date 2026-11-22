@@ -127,7 +127,12 @@ fn drifted_batch_triggers_exit_one_and_catches_all_failure_modes() {
     assert!(parsed["features_drifted"].as_u64().unwrap() >= 3);
     assert!(parsed["max_missing_delta"].as_f64().unwrap() > 0.25);
     assert_eq!(parsed["calibration_drift"]["severity"], "drift");
-    assert!(parsed["calibration_drift"]["current"]["ece"].as_f64().unwrap() > 0.30);
+    assert!(
+        parsed["calibration_drift"]["current"]["ece"]
+            .as_f64()
+            .unwrap()
+            > 0.30
+    );
 
     let prog_feat = parsed["features"]
         .as_array()
@@ -231,16 +236,28 @@ fn handles_high_cardinality_corrupted_numeric_constant_col_na_and_duplicate_head
     fs::write(&dup_csv, "x,x\n1,2\n").unwrap();
     Command::cargo_bin("driftkeel")
         .unwrap()
-        .args(["check", dup_csv.to_str().unwrap(), dup_csv.to_str().unwrap()])
+        .args([
+            "check",
+            dup_csv.to_str().unwrap(),
+            dup_csv.to_str().unwrap(),
+        ])
         .assert()
         .code(2);
 
     // 4. Corrupt baseline JSON rejected cleanly (not falling through to read_json_array)
     let bad_base = dir.path().join("bad_baseline.json");
-    fs::write(&bad_base, r#"{"tool":"driftkeel","schema_version":1,"bins":0}"#).unwrap();
+    fs::write(
+        &bad_base,
+        r#"{"tool":"driftkeel","schema_version":1,"bins":0}"#,
+    )
+    .unwrap();
     Command::cargo_bin("driftkeel")
         .unwrap()
-        .args(["check", bad_base.to_str().unwrap(), cats_path.to_str().unwrap()])
+        .args([
+            "check",
+            bad_base.to_str().unwrap(),
+            cats_path.to_str().unwrap(),
+        ])
         .assert()
         .code(2);
 }
@@ -250,7 +267,13 @@ fn skill_prints_and_installs() {
     let dir = tempdir().unwrap();
     Command::cargo_bin("driftkeel")
         .unwrap()
-        .args(["skill", "--install", dir.path().to_str().unwrap(), "--format", "human"])
+        .args([
+            "skill",
+            "--install",
+            dir.path().to_str().unwrap(),
+            "--format",
+            "human",
+        ])
         .assert()
         .success();
     let installed = dir.path().join("driftkeel/SKILL.md");
