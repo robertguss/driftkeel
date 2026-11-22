@@ -576,7 +576,7 @@ pub fn build_snapshot(
         created_at: Utc::now().to_rfc3339(),
         source_name: source_name.to_string(),
         row_count: table.row_count,
-        bins,
+        bins: bins.clamp(2, 50),
         sha256: String::new(),
         score_col: score_col.map(|s| s.to_string()),
         label_col: label_col.map(|s| s.to_string()),
