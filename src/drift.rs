@@ -30,6 +30,74 @@ pub struct BaselineSnapshot {
     pub calibration_baseline: Option<CalibrationSummary>,
 }
 
+impl BaselineSnapshot {
+    /// Validate invariants of a deserialized baseline JSON snapshot.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.tool != "driftkeel" {
+            return Err(format!("invalid baseline tool `{}`", self.tool));
+        }
+        if self.bins < 2 {
+            return Err(format!("invalid baseline bins `{}` (must be >= 2)", self.bins));
+        }
+        for (col, base) in &self.columns {
+            match base {
+                ColumnBaseline::Numeric {
+                    missing_rate,
+                    bin_edges,
+                    bin_props,
+                    quantile_sketch,
+                    ..
+                } => {
+                    if !missing_rate.is_finite() || !(*missing_rate >= 0.0 && *missing_rate <= 1.0) {
+                        return Err(format!("invalid missing_rate on baseline column `{col}`"));
+                    }
+                    if bin_props.len() != bin_edges.len() + 1 {
+                        return Err(format!(
+                            "corrupt baseline column `{col}`: bin_props.len() ({}) != bin_edges.len() + 1 ({})",
+                            bin_props.len(),
+                            bin_edges.len() + 1
+                        ));
+                    }
+                    if bin_edges.iter().any(|v| !v.is_finite())
+                        || bin_edges.windows(2).any(|w| w[0] > w[1])
+                    {
+                        return Err(format!(
+                            "corrupt baseline column `{col}`: bin_edges must be finite and non-decreasing"
+                        ));
+                    }
+                    if bin_props.iter().any(|v| !v.is_finite() || *v < 0.0) {
+                        return Err(format!(
+                            "corrupt baseline column `{col}`: bin_props must be finite and >= 0"
+                        ));
+                    }
+                    if quantile_sketch.iter().any(|v| !v.is_finite())
+                        || quantile_sketch.windows(2).any(|w| w[0] > w[1])
+                    {
+                        return Err(format!(
+                            "corrupt baseline column `{col}`: quantile_sketch must be finite and non-decreasing"
+                        ));
+                    }
+                }
+                ColumnBaseline::Categorical {
+                    missing_rate,
+                    frequencies,
+                    ..
+                } => {
+                    if !missing_rate.is_finite() || !(*missing_rate >= 0.0 && *missing_rate <= 1.0) {
+                        return Err(format!("invalid missing_rate on baseline column `{col}`"));
+                    }
+                    if frequencies.values().any(|v| !v.is_finite() || *v < 0.0) {
+                        return Err(format!(
+                            "corrupt baseline column `{col}`: categorical frequencies must be finite and >= 0"
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ColumnBaseline {
@@ -208,24 +276,33 @@ fn quantile_sorted(sorted: &[f64], q: f64) -> f64 {
     let pos = q.clamp(0.0, 1.0) * ((sorted.len() - 1) as f64);
     let lo = pos.floor() as usize;
     let hi = pos.ceil() as usize;
-    if lo == hi {
-        sorted[lo]
+    let a = sorted[lo];
+    let b = sorted[hi];
+    if lo == hi || a == b {
+        a
     } else {
         let w = pos - (lo as f64);
-        sorted[lo] * (1.0 - w) + sorted[hi] * w
+        (a + (b - a) * w).clamp(a, b)
     }
 }
 
 fn build_quantile_edges(sorted: &[f64], bins: usize) -> Vec<f64> {
     let b = bins.clamp(2, 50);
-    if sorted.len() < 2 || (sorted[0] - sorted[sorted.len() - 1]).abs() < 1e-12 {
+    if sorted.is_empty() {
         return Vec::new();
+    }
+    // Zero-variance / constant reference column: emit tight guard edges `[c - 1e-9, c + 1e-9]`
+    // so identical values stay in the center bin (`PSI = 0`) while out-of-point shifts trigger drift!
+    if sorted.len() < 2 || (sorted[0] - sorted[sorted.len() - 1]).abs() <= 1e-12 {
+        let c = sorted[0];
+        let delta = (c.abs() * 1e-9).max(1e-9);
+        return vec![c - delta, c + delta];
     }
     let mut edges: Vec<f64> = Vec::new();
     for i in 1..b {
         let q = (i as f64) / (b as f64);
         let e = quantile_sorted(sorted, q);
-        if edges.last().is_none_or(|&prev| (e - prev).abs() > 1e-12) {
+        if edges.last().is_none_or(|&prev| e > prev + 1e-12) {
             edges.push(e);
         }
     }
@@ -415,9 +492,10 @@ pub fn build_snapshot(
         }
         let n_rows = table.row_count.max(1);
         if is_numeric_column(col_name, vals, &forced_cat) {
-            let (mut nums, non_null) = parse_numeric_col(vals);
+            let (mut nums, _non_null) = parse_numeric_col(vals);
             nums.sort_by(|a, b| a.total_cmp(b));
-            let missing_rate = ((n_rows.saturating_sub(non_null)) as f64) / (n_rows as f64);
+            // Count only finite valid numeric values toward completeness so corrupted/Inf cells count as missing
+            let missing_rate = ((n_rows.saturating_sub(nums.len())) as f64) / (n_rows as f64);
             let mean = if nums.is_empty() {
                 0.0
             } else {
@@ -463,8 +541,9 @@ pub fn build_snapshot(
             let cardinality = entries.len();
             let mut freqs = IndexMap::new();
             let mut other_sum = 0usize;
+            const MAX_TRACKED_CATEGORIES: usize = 2000;
             for (idx, (cat, cnt)) in entries.into_iter().enumerate() {
-                if idx < 100 {
+                if idx < MAX_TRACKED_CATEGORIES {
                     freqs.insert(cat, r6((cnt as f64) / denom));
                 } else {
                     other_sum += cnt;
@@ -660,6 +739,7 @@ pub fn evaluate_drift(
         max_psi = max_psi.max(pd.psi);
         max_ks = max_ks.max(pd.ks_stat.unwrap_or(0.0));
         max_js = max_js.max(pd.js_divergence);
+        max_missing_delta = max_missing_delta.max(pd.missing_delta);
     }
     if let Some(cd) = &calibration_drift {
         verdict = verdict.max(cd.severity);
@@ -763,9 +843,23 @@ fn compare_column(
             ..
         } => {
             let (mut cur_nums, cur_non_null) = parse_numeric_col(cur_vals);
+            let invalid_numeric = cur_non_null.saturating_sub(cur_nums.len());
             cur_nums.sort_by(|a, b| a.total_cmp(b));
-            let cur_miss = ((n_cur.saturating_sub(cur_non_null)) as f64) / (n_cur as f64);
+            // Count non-finite / unparseable numeric cells as missing so corrupted upstream strings trigger alerts!
+            let cur_miss = ((n_cur.saturating_sub(cur_nums.len())) as f64) / (n_cur as f64);
             let miss_delta = cur_miss - ref_miss;
+            if invalid_numeric > 0 {
+                let bad_rate = (invalid_numeric as f64) / (n_cur as f64);
+                reasons.push(format!(
+                    "INVALID_NUMERIC: {invalid_numeric} unparseable/non-finite value(s) ({:.1}% of rows)",
+                    bad_rate * 100.0
+                ));
+                if bad_rate >= t.missing_fail {
+                    severity = severity.max(Severity::Drift);
+                } else if bad_rate >= t.missing_warn {
+                    severity = severity.max(Severity::Warn);
+                }
+            }
 
             let cur_props = bin_proportions(&cur_nums, bin_edges);
             let psi = if cur_nums.is_empty() {
@@ -889,12 +983,20 @@ fn compare_column(
             let miss_delta = cur_miss - ref_miss;
             let denom = cur_non_null.max(1) as f64;
 
+            let has_other_bucket = ref_freqs.contains_key("__OTHER__");
             let mut all_keys: Vec<String> = ref_freqs.keys().cloned().collect();
             let mut unseen = Vec::new();
-            for k in cur_counts.keys() {
+            let mut other_cur_count = 0usize;
+            for (k, &cnt) in &cur_counts {
                 if !ref_freqs.contains_key(k) {
-                    unseen.push(k.clone());
-                    all_keys.push(k.clone());
+                    if has_other_bucket {
+                        // Reference truncated tail categories into `__OTHER__`: fold tail into
+                        // `__OTHER__` instead of false-flagging reference tail levels as unseen!
+                        other_cur_count += cnt;
+                    } else {
+                        unseen.push(k.clone());
+                        all_keys.push(k.clone());
+                    }
                 }
             }
             unseen.sort();
@@ -904,7 +1006,12 @@ fn compare_column(
             let mut bin_comp = Vec::new();
             for k in &all_keys {
                 let rp = ref_freqs.get(k).copied().unwrap_or(0.0);
-                let cp = cur_counts.get(k).map(|&c| (c as f64) / denom).unwrap_or(0.0);
+                let cp = if has_other_bucket && k == "__OTHER__" {
+                    let direct = cur_counts.get(k).copied().unwrap_or(0);
+                    ((direct + other_cur_count) as f64) / denom
+                } else {
+                    cur_counts.get(k).map(|&c| (c as f64) / denom).unwrap_or(0.0)
+                };
                 p_vec.push(rp);
                 q_vec.push(cp);
                 bin_comp.push(BinComparison {

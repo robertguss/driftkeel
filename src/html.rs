@@ -7,6 +7,7 @@ fn esc(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 fn badge(sev: Severity) -> &'static str {

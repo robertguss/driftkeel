@@ -38,9 +38,20 @@ fn try_load_baseline_json(path: &Path) -> Result<Option<BaselineSnapshot>, Strin
     }
     let content =
         fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    if let Ok(snap) = serde_json::from_str::<BaselineSnapshot>(&content)
-        && snap.tool == "driftkeel"
-    {
+    let val: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("invalid JSON in {}: {e}", path.display()))?;
+    let is_baseline_obj = val.as_object().is_some_and(|obj| {
+        obj.get("tool").and_then(|v| v.as_str()) == Some("driftkeel")
+            || obj.contains_key("schema_version")
+    });
+    if is_baseline_obj {
+        let snap: BaselineSnapshot = serde_json::from_value(val).map_err(|e| {
+            format!(
+                "corrupt driftkeel baseline snapshot {}: {e}",
+                path.display()
+            )
+        })?;
+        snap.validate()?;
         return Ok(Some(snap));
     }
     Ok(None)
